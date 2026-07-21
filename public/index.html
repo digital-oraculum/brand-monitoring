@@ -475,23 +475,19 @@
       <div id="alertBox" class="hidden"></div>
 
       <section id="authSection" class="auth-panel card">
-        <h2>Połącz konto Google</h2>
+        <h2>Zaloguj się</h2>
         <p class="muted">
-          Zaloguj się kontem, które ma dostęp do witryn w Google Search Console.
-          Aplikacja pobiera tylko dane do odczytu (kliknięcia, wyświetlenia, słowa kluczowe).
+          Zaloguj się kontem Google, aby uzyskać dostęp do raportów brandowych WSKZ.
+          Dane pochodzą ze stałego źródła GSC — nie podpinasz własnych domen ani witryn.
         </p>
         <a href="/auth/google" style="text-decoration: none;">
-          <button style="max-width: 280px; margin: 16px auto 0;">Połącz z Google</button>
+          <button style="max-width: 280px; margin: 16px auto 0;">Zaloguj przez Google</button>
         </a>
       </section>
 
       <section id="dashboardSection" class="hidden">
         <div class="controls card">
           <div class="controls-grid">
-            <div id="siteControlWrap" class="hidden">
-              <label for="siteSelect">Witryna</label>
-              <select id="siteSelect"></select>
-            </div>
             <div>
               <label for="periodPreset">Okres analizy</label>
               <select id="periodPreset">
@@ -544,7 +540,6 @@
         <div class="tabs" style="margin-top: 4px;">
           <button class="tab main-tab active" data-main-tab="brand">Raport brand</button>
           <button class="tab main-tab" data-main-tab="categories">Raport brand z podziałem na kategorie</button>
-          <button class="tab main-tab tab-secondary" data-main-tab="gsc" title="Dodatkowy widok — pojedyncza witryna GSC">GSC (opcjonalnie)</button>
         </div>
 
         <div id="wskzMissingDomains" class="alert hidden" style="margin-bottom: 16px;"></div>
@@ -720,119 +715,6 @@
                 </thead>
                 <tbody id="wskzCategoryQueriesTable"></tbody>
               </table>
-            </div>
-          </div>
-        </div>
-
-        <!-- GSC Dashboard (opcjonalny) -->
-        <div id="gscDashboardSection" class="hidden">
-          <p class="section-hint">
-            Widok pomocniczy dla pojedynczej witryny GSC — nie używa filtra brand / kategorii WSKZ.
-          </p>
-          <div class="kpi-grid">
-            <div class="card kpi">
-              <div class="label">Wyświetlenia</div>
-              <div class="value" id="kpiImpressions">—</div>
-            </div>
-            <div class="card kpi">
-              <div class="label">Kliknięcia</div>
-              <div class="value" id="kpiClicks">—</div>
-            </div>
-            <div class="card kpi">
-              <div class="label">CTR</div>
-              <div class="value" id="kpiCtr">—</div>
-            </div>
-            <div class="card kpi">
-              <div class="label">Śr. pozycja</div>
-              <div class="value" id="kpiPosition">—</div>
-            </div>
-          </div>
-
-          <div class="tabs">
-            <button class="gsc-tab tab active" data-tab="overview">Przegląd</button>
-            <button class="gsc-tab tab" data-tab="queries">Słowa kluczowe</button>
-            <button class="gsc-tab tab" data-tab="pages">Strony</button>
-            <button class="gsc-tab tab" data-tab="devices">Urządzenia</button>
-            <button class="gsc-tab tab" data-tab="countries">Kraje</button>
-          </div>
-
-          <div id="tab-overview">
-            <div class="dashboard-grid">
-              <div class="card">
-                <h3 style="margin-top: 0;">Trend kliknięć i wyświetleń <span id="trendGranularityLabel" class="muted" style="font-size: 0.85rem; font-weight: normal;"></span></h3>
-                <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
-              </div>
-              <div class="card">
-                <h3 style="margin-top: 0;">Podział urządzeń</h3>
-                <div class="chart-wrap"><canvas id="deviceChart"></canvas></div>
-              </div>
-            </div>
-          </div>
-
-          <div id="tab-queries" class="hidden">
-            <div class="card">
-              <h3 style="margin-top: 0;">Top słowa kluczowe</h3>
-              <div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Słowo kluczowe</th>
-                      <th class="num">Wyświetlenia</th>
-                      <th class="num">Kliknięcia</th>
-                      <th class="num">CTR</th>
-                      <th class="num">Pozycja</th>
-                    </tr>
-                  </thead>
-                  <tbody id="queriesTable"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div id="tab-pages" class="hidden">
-            <div class="card">
-              <h3 style="margin-top: 0;">Top strony</h3>
-              <div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>URL</th>
-                      <th class="num">Wyświetlenia</th>
-                      <th class="num">Kliknięcia</th>
-                      <th class="num">CTR</th>
-                      <th class="num">Pozycja</th>
-                    </tr>
-                  </thead>
-                  <tbody id="pagesTable"></tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-
-          <div id="tab-devices" class="hidden">
-            <div class="card">
-              <h3 style="margin-top: 0;">Ruch wg urządzeń</h3>
-              <div class="chart-wrap"><canvas id="deviceDetailChart"></canvas></div>
-            </div>
-          </div>
-
-          <div id="tab-countries" class="hidden">
-            <div class="card">
-              <h3 style="margin-top: 0;">Top kraje</h3>
-              <div class="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Kraj</th>
-                      <th class="num">Wyświetlenia</th>
-                      <th class="num">Kliknięcia</th>
-                      <th class="num">CTR</th>
-                      <th class="num">Pozycja</th>
-                    </tr>
-                  </thead>
-                  <tbody id="countriesTable"></tbody>
-                </table>
-              </div>
             </div>
           </div>
         </div>

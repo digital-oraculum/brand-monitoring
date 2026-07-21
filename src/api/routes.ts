@@ -1,8 +1,15 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
-import type { GoogleOAuth } from "../auth/google-oauth.js";
-import type { TokenStore } from "../auth/token-store.js";
+import type { UserGoogleAuth } from "../auth/user-google-auth.js";
+import type { GscServiceAuth } from "../auth/gsc-service-auth.js";
+import {
+  createSessionToken,
+  getSessionCookieName,
+  parseSessionToken,
+  sessionCookieOptions,
+  type UserSession,
+} from "../auth/session.js";
 import { GscClient } from "../gsc/client.js";
 import {
   isWskzBrandQuery,
@@ -27,13 +34,6 @@ import {
   monthKeyFromDate,
 } from "../brand/wskz-brand-data.js";
 
-const dateRangeSchema = z.object({
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  siteUrl: z.string().min(1),
-  rowLimit: z.coerce.number().int().min(1).max(500).optional(),
-});
-
 const brandDateRangeSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -51,12 +51,29 @@ function parseGranularity(query: unknown): TrendGranularity {
 
 interface RouteDeps {
   config: AppConfig;
-  oauth: GoogleOAuth;
-  tokenStore: TokenStore;
+  userAuth: UserGoogleAuth;
+  gscAuth: GscServiceAuth;
 }
 
-function getGscClient(oauth: GoogleOAuth): GscClient | null {
-  const auth = oauth.getAuthenticatedClient();
+function getUserSession(req: FastifyRequest, secret: string): UserSession | null {
+  const cookieName = getSessionCookieName();
+  const token = req.cookies[cookieName];
+  return parseSessionToken(token, secret);
+}
+
+function requireUser(config: AppConfig) {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    const session = getUserSession(req, config.sessionSecret);
+    if (!session) {
+      return reply.status(401).send({ error: "Wymagane logowanie" });
+    }
+    req.userSession = session;
+  };
+}
+
+function getGscClient(gscAuth: GscServiceAuth): GscClient | null {
+  if (!gscAuth.isConfigured()) return null;
+  const auth = gscAuth.getAuthenticatedClient();
   if (!auth) return null;
   return new GscClient(auth);
 }
@@ -80,18 +97,6 @@ function defaultDateRange() {
     startDate: formatLocalDate(start),
     endDate: formatLocalDate(end),
   };
-}
-
-function parseDateRangeQuery(query: unknown) {
-  const params =
-    typeof query === "object" && query !== null
-      ? (query as Record<string, unknown>)
-      : {};
-
-  return dateRangeSchema.safeParse({
-    ...defaultDateRange(),
-    ...params,
-  });
 }
 
 function parseBrandDateRangeQuery(query: unknown) {
@@ -242,58 +247,25 @@ function aggregateTrendRows(
   return rows;
 }
 
-function aggregateTrendByMonth(
-  rows: Array<{ keys: string[]; clicks: number; impressions: number; position: number }>,
-) {
-  const map = new Map<string, { clicks: number; impressions: number; positionWeightedSum: number }>();
-
-  for (const row of rows) {
-    const monthKey = monthKeyFromDate(row.keys[0] ?? "");
-    if (!monthKey) continue;
-
-    const prev = map.get(monthKey) ?? { clicks: 0, impressions: 0, positionWeightedSum: 0 };
-    prev.clicks += row.clicks;
-    prev.impressions += row.impressions;
-    prev.positionWeightedSum += row.position * row.impressions;
-    map.set(monthKey, prev);
-  }
-
-  return [...map.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([monthKey, v]) => {
-      const ctr = v.impressions > 0 ? v.clicks / v.impressions : 0;
-      const position = v.impressions > 0 ? v.positionWeightedSum / v.impressions : 0;
-      return { keys: [monthKey], clicks: v.clicks, impressions: v.impressions, ctr, position };
-    });
-}
-
-function applyTrendGranularity(
-  rows: Array<{ keys: string[]; clicks: number; impressions: number; ctr: number; position: number }>,
-  granularity: TrendGranularity,
-) {
-  if (granularity === "day") {
-    return rows;
-  }
-  return aggregateTrendByMonth(rows);
-}
-
 export async function registerRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
 ): Promise<void> {
-  const { oauth, tokenStore } = deps;
+  const { config, userAuth, gscAuth } = deps;
+  const authGuard = requireUser(config);
 
-  app.get("/api/auth/status", async () => {
-    const tokens = tokenStore.load();
+  app.get("/api/auth/status", async (req) => {
+    const session = getUserSession(req, config.sessionSecret);
     return {
-      authenticated: tokenStore.isAuthenticated(),
-      email: tokens?.email ?? null,
-      updatedAt: tokens?.updatedAt ?? null,
+      authenticated: Boolean(session),
+      email: session?.email ?? null,
+      name: session?.name ?? null,
+      gscConfigured: gscAuth.isConfigured(),
     };
   });
 
   app.get("/auth/google", async (_req, reply) => {
-    const url = oauth.getAuthUrl();
+    const url = userAuth.getAuthUrl();
     return reply.redirect(url);
   });
 
@@ -304,7 +276,14 @@ export async function registerRoutes(
     }
 
     try {
-      await oauth.handleCallback(code);
+      const profile = await userAuth.handleCallback(code);
+
+      if (!userAuth.isEmailAllowed(profile.email)) {
+        return reply.redirect("/?error=not_allowed");
+      }
+
+      const token = createSessionToken(profile, config.sessionSecret);
+      reply.setCookie(getSessionCookieName(), token, sessionCookieOptions());
       return reply.redirect("/?connected=1");
     } catch (error) {
       app.log.error(error);
@@ -312,142 +291,18 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/auth/logout", async () => {
-    oauth.logout();
+  app.post("/auth/logout", async (_req, reply) => {
+    reply.clearCookie(getSessionCookieName(), { path: "/" });
     return { ok: true };
   });
 
-  app.get("/api/sites", async (_req, reply) => {
-    const client = getGscClient(oauth);
-    if (!client) {
-      return reply.status(401).send({ error: "Nie zalogowano" });
-    }
-
-    try {
-      const sites = await client.listSites();
-      return { sites };
-    } catch (error) {
-      app.log.error(error);
-      return reply.status(502).send({ error: "Nie udało się pobrać witryn z GSC" });
-    }
-  });
-
-  app.get("/api/analytics/overview", async (req, reply) => {
-    const client = getGscClient(oauth);
-    if (!client) {
-      return reply.status(401).send({ error: "Nie zalogowano" });
-    }
-
-    const parsed = parseDateRangeQuery(req.query);
-
-    if (!parsed.success) {
-      return reply.status(400).send({ error: "Nieprawidłowe parametry", details: parsed.error.flatten() });
-    }
-
-    try {
-      const granularity = parseGranularity(req.query);
-      const overview = await client.getOverview(parsed.data);
-      const trend = await client.getDailyTrend(parsed.data);
-      return {
-        overview,
-        trend: { rows: applyTrendGranularity(trend.rows, granularity), granularity },
-        range: parsed.data,
-      };
-    } catch (error) {
-      app.log.error(error);
-      return reply.status(502).send({ error: "Nie udało się pobrać danych analitycznych" });
-    }
-  });
-
-  app.get("/api/analytics/queries", async (req, reply) => {
-    const client = getGscClient(oauth);
-    if (!client) {
-      return reply.status(401).send({ error: "Nie zalogowano" });
-    }
-
-    const parsed = parseDateRangeQuery(req.query);
-
-    if (!parsed.success) {
-      return reply.status(400).send({ error: "Nieprawidłowe parametry" });
-    }
-
-    try {
-      const result = await client.getTopQueries(parsed.data);
-      return { ...result, range: parsed.data };
-    } catch (error) {
-      app.log.error(error);
-      return reply.status(502).send({ error: "Nie udało się pobrać słów kluczowych" });
-    }
-  });
-
-  app.get("/api/analytics/pages", async (req, reply) => {
-    const client = getGscClient(oauth);
-    if (!client) {
-      return reply.status(401).send({ error: "Nie zalogowano" });
-    }
-
-    const parsed = parseDateRangeQuery(req.query);
-
-    if (!parsed.success) {
-      return reply.status(400).send({ error: "Nieprawidłowe parametry" });
-    }
-
-    try {
-      const result = await client.getTopPages(parsed.data);
-      return { ...result, range: parsed.data };
-    } catch (error) {
-      app.log.error(error);
-      return reply.status(502).send({ error: "Nie udało się pobrać stron" });
-    }
-  });
-
-  app.get("/api/analytics/devices", async (req, reply) => {
-    const client = getGscClient(oauth);
-    if (!client) {
-      return reply.status(401).send({ error: "Nie zalogowano" });
-    }
-
-    const parsed = parseDateRangeQuery(req.query);
-
-    if (!parsed.success) {
-      return reply.status(400).send({ error: "Nieprawidłowe parametry" });
-    }
-
-    try {
-      const result = await client.getDeviceBreakdown(parsed.data);
-      return { ...result, range: parsed.data };
-    } catch (error) {
-      app.log.error(error);
-      return reply.status(502).send({ error: "Nie udało się pobrać danych urządzeń" });
-    }
-  });
-
-  app.get("/api/analytics/countries", async (req, reply) => {
-    const client = getGscClient(oauth);
-    if (!client) {
-      return reply.status(401).send({ error: "Nie zalogowano" });
-    }
-
-    const parsed = parseDateRangeQuery(req.query);
-
-    if (!parsed.success) {
-      return reply.status(400).send({ error: "Nieprawidłowe parametry" });
-    }
-
-    try {
-      const result = await client.getCountryBreakdown(parsed.data);
-      return { ...result, range: parsed.data };
-    } catch (error) {
-      app.log.error(error);
-      return reply.status(502).send({ error: "Nie udało się pobrać danych krajów" });
-    }
-  });
-
   // Brand report: agregacja dla WSKZ po wielu domenach
-  app.get("/api/brand/wskz/overview", async (req, reply) => {
-    const client = getGscClient(oauth);
+  app.get("/api/brand/wskz/overview", { preHandler: authGuard }, async (req, reply) => {
+    const client = getGscClient(gscAuth);
     if (!client) {
-      return reply.status(401).send({ error: "Nie zalogowano" });
+      return reply.status(503).send({
+        error: "Brak skonfigurowanego dostępu do Google Search Console po stronie serwera",
+      });
     }
 
     const parsed = parseBrandQuery(req.query, deps.config.wskzDomains);
@@ -463,7 +318,7 @@ export async function registerRoutes(
       const brandSites = filterBrandSitesByDomains(allBrandSites, selectedDomains);
       if (!brandSites.siteUrls.length) {
         return reply.status(404).send({
-          error: "Nie znaleziono witryn dla wybranych domen WSKZ w Twoim Search Console",
+          error: "Nie skonfigurowano dostępu GSC do wybranych domen WSKZ",
           configuredDomains: deps.config.wskzDomains,
           selectedDomains,
           missingDomains: brandSites.missing,
@@ -506,10 +361,12 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/brand/wskz/queries", async (req, reply) => {
-    const client = getGscClient(oauth);
+  app.get("/api/brand/wskz/queries", { preHandler: authGuard }, async (req, reply) => {
+    const client = getGscClient(gscAuth);
     if (!client) {
-      return reply.status(401).send({ error: "Nie zalogowano" });
+      return reply.status(503).send({
+        error: "Brak skonfigurowanego dostępu do Google Search Console po stronie serwera",
+      });
     }
 
     const parsed = parseBrandQuery(req.query, deps.config.wskzDomains);
@@ -524,7 +381,7 @@ export async function registerRoutes(
       const brandSites = filterBrandSitesByDomains(allBrandSites, selectedDomains);
       if (!brandSites.siteUrls.length) {
         return reply.status(404).send({
-          error: "Nie znaleziono witryn dla wybranych domen WSKZ w Twoim Search Console",
+          error: "Nie skonfigurowano dostępu GSC do wybranych domen WSKZ",
           configuredDomains: deps.config.wskzDomains,
           selectedDomains,
           missingDomains: brandSites.missing,
@@ -579,10 +436,12 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/brand/wskz/categories", async (req, reply) => {
-    const client = getGscClient(oauth);
+  app.get("/api/brand/wskz/categories", { preHandler: authGuard }, async (req, reply) => {
+    const client = getGscClient(gscAuth);
     if (!client) {
-      return reply.status(401).send({ error: "Nie zalogowano" });
+      return reply.status(503).send({
+        error: "Brak skonfigurowanego dostępu do Google Search Console po stronie serwera",
+      });
     }
 
     const parsed = parseBrandQuery(req.query, deps.config.wskzDomains);
@@ -598,7 +457,7 @@ export async function registerRoutes(
       const brandSites = filterBrandSitesByDomains(allBrandSites, selectedDomains);
       if (!brandSites.siteUrls.length) {
         return reply.status(404).send({
-          error: "Nie znaleziono witryn dla wybranych domen WSKZ w Twoim Search Console",
+          error: "Nie skonfigurowano dostępu GSC do wybranych domen WSKZ",
           configuredDomains: deps.config.wskzDomains,
           selectedDomains,
           missingDomains: brandSites.missing,

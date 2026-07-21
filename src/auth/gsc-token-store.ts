@@ -2,11 +2,13 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import type { StoredTokens } from "../types.js";
 
-export class TokenStore {
+/** Token GSC używany wyłącznie po stronie serwera do pobierania danych WSKZ. */
+export class GscTokenStore {
   constructor(private readonly path: string) {}
 
   load(): StoredTokens | null {
-    const fromEnv = process.env.TOKENS_JSON;
+    const fromEnv =
+      process.env.GSC_TOKENS_JSON ?? process.env.TOKENS_JSON;
     if (fromEnv) {
       try {
         return JSON.parse(fromEnv) as StoredTokens;
@@ -29,7 +31,6 @@ export class TokenStore {
 
   save(tokens: StoredTokens): void {
     if (process.env.VERCEL) {
-      // Na Vercel ustaw TOKENS_JSON w zmiennych środowiskowych (persist poza runtime).
       return;
     }
 
@@ -38,12 +39,6 @@ export class TokenStore {
       mkdirSync(dir, { recursive: true });
     }
     writeFileSync(this.path, JSON.stringify(tokens, null, 2), "utf-8");
-  }
-
-  clear(): void {
-    if (existsSync(this.path)) {
-      writeFileSync(this.path, "", "utf-8");
-    }
   }
 
   isAuthenticated(): boolean {

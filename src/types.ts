@@ -54,3 +54,9 @@ export interface ApiDimensionFilterGroup {
   filters?: ApiDimensionFilter[];
   groupType?: string;
 }
+
+declare module "fastify" {
+  interface FastifyRequest {
+    userSession?: import("./auth/session.js").UserSession;
+  }
+}

@@ -90,11 +90,8 @@ function updateReportContextBar() {
   }
 }
 
-function syncBrandFiltersVisibility(mainTab) {
-  const isGsc = mainTab === "gsc";
-  qs("brandFiltersBar")?.classList.toggle("hidden", isGsc);
-  qs("reportContextBar")?.classList.toggle("hidden", isGsc);
-  qs("siteControlWrap")?.classList.toggle("hidden", !isGsc);
+function syncBrandFiltersVisibility() {
+  // Filtry brand są zawsze widoczne (brak zakładki GSC).
 }
 
 /** Ostatni dzień z kompletnymi danymi GSC (typowe opóźnienie ~3 dni). */
@@ -221,14 +218,12 @@ async function refreshActiveDashboard({ force = true } = {}) {
   if (qs("dashboardSection").classList.contains("hidden")) return;
 
   const activeMainTab = document.querySelector(".main-tab.active")?.dataset.mainTab ?? "brand";
-  if (activeMainTab === "brand") {
-    if (force) await refreshBrand();
-    else await showBrandReport({ force: false });
-  } else if (activeMainTab === "categories") {
+  if (activeMainTab === "categories") {
     if (force) await refreshBrandCategories();
     else await showBrandCategoriesReport({ force: false });
   } else {
-    await refreshAll();
+    if (force) await refreshBrand();
+    else await showBrandReport({ force: false });
   }
 }
 
@@ -242,10 +237,9 @@ function appendGranularityParam(params) {
 }
 
 function getQueryParams() {
-  const siteUrl = qs("siteSelect").value;
   const startDate = qs("startDate").value;
   const endDate = qs("endDate").value;
-  return appendGranularityParam(new URLSearchParams({ siteUrl, startDate, endDate }));
+  return appendGranularityParam(new URLSearchParams({ startDate, endDate }));
 }
 
 const DEFAULT_WSKZ_DOMAINS = [
@@ -391,8 +385,8 @@ function renderBrandDomainStatus(data) {
   }
 }
 
-async function api(path) {
-  const res = await fetch(path);
+async function api(path, options = {}) {
+  const res = await fetch(path, { credentials: "include", ...options });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error || `Błąd HTTP ${res.status}`);
@@ -504,26 +498,6 @@ function renderBrandQueriesTable(rows = brandQueriesState.rows, domainList = bra
   syncWskzDomainColumnVisibility();
 }
 
-function renderTable(tbodyId, rows, keyLabel) {
-  const tbody = qs(tbodyId);
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="muted">Brak danych w wybranym okresie</td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = rows
-    .map(
-      (row) => `
-      <tr>
-        <td>${escapeHtml(row.keys[0] ?? "—")}</td>
-        <td class="num">${fmt.number(row.impressions)}</td>
-        <td class="num">${fmt.number(row.clicks)}</td>
-        <td class="num">${fmt.percent(row.ctr)}</td>
-        <td class="num">${fmt.position(row.position)}</td>
-      </tr>`,
-    )
-    .join("");
-}
 
 function escapeHtml(text) {
   return text
@@ -557,55 +531,9 @@ function chartDefaults() {
 function updateTrendGranularityLabels(granularity) {
   const label = fmt.granularityLabel(granularity);
   const wskzLabel = qs("wskzTrendGranularityLabel");
-  const gscLabel = qs("trendGranularityLabel");
   if (wskzLabel) wskzLabel.textContent = label;
-  if (gscLabel) gscLabel.textContent = label;
 }
 
-function renderTrendChart(rows, granularity = getSelectedGranularity()) {
-  destroyChart("trend");
-  updateTrendGranularityLabels(granularity);
-  const sorted = [...rows].sort((a, b) => a.keys[0].localeCompare(b.keys[0]));
-  const labels = sorted.map((r) => fmt.trendLabel(r.keys[0], granularity));
-  const ctx = qs("trendChart").getContext("2d");
-
-  state.charts.trend = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "Kliknięcia",
-          data: sorted.map((r) => r.clicks),
-          borderColor: "#5b8cff",
-          backgroundColor: "rgba(91, 140, 255, 0.15)",
-          tension: 0.3,
-          fill: true,
-        },
-        {
-          label: "Wyświetlenia",
-          data: sorted.map((r) => r.impressions),
-          borderColor: "#7c5cff",
-          backgroundColor: "rgba(124, 92, 255, 0.08)",
-          tension: 0.3,
-          yAxisID: "y1",
-        },
-      ],
-    },
-    options: {
-      ...chartDefaults(),
-      scales: {
-        x: chartDefaults().scales.x,
-        y: { ...chartDefaults().scales.y, position: "left" },
-        y1: {
-          ...chartDefaults().scales.y,
-          position: "right",
-          grid: { drawOnChartArea: false },
-        },
-      },
-    },
-  });
-}
 
 function renderBrandTrendChart(rows, granularity = getSelectedGranularity()) {
   destroyChart("brandTrend");
@@ -1034,45 +962,6 @@ async function refreshBrandCategories() {
   await showBrandCategoriesReport({ force: true });
 }
 
-function renderDeviceChart(canvasId, chartName, rows) {
-  destroyChart(chartName);
-  const ctx = qs(canvasId).getContext("2d");
-  const labels = rows.map((r) => deviceLabel(r.keys[0]));
-  const clicks = rows.map((r) => r.clicks);
-
-  state.charts[chartName] = new Chart(ctx, {
-    type: "doughnut",
-    data: {
-      labels,
-      datasets: [
-        {
-          data: clicks,
-          backgroundColor: ["#5b8cff", "#3ddc97", "#ffd166", "#ff6b6b"],
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { position: "bottom", labels: { color: "#edf2f7" } } },
-    },
-  });
-}
-
-function deviceLabel(code) {
-  const map = { DESKTOP: "Desktop", MOBILE: "Mobile", TABLET: "Tablet" };
-  return map[code] ?? code;
-}
-
-function countryLabel(code) {
-  try {
-    const regionNames = new Intl.DisplayNames(["pl"], { type: "region" });
-    return regionNames.of(code) ?? code;
-  } catch {
-    return code;
-  }
-}
-
 async function loadAuthStatus() {
   const status = await api("/api/auth/status");
   const badge = qs("authBadge");
@@ -1081,7 +970,7 @@ async function loadAuthStatus() {
   const logoutBtn = qs("logoutBtn");
 
   if (status.authenticated) {
-    badge.textContent = status.email ? `Połączono: ${status.email}` : "Połączono";
+    badge.textContent = status.email ? `Zalogowano: ${status.email}` : "Zalogowano";
     badge.classList.remove("offline");
     authSection.classList.add("hidden");
     dashboardSection.classList.remove("hidden");
@@ -1089,36 +978,12 @@ async function loadAuthStatus() {
     return true;
   }
 
-  badge.textContent = "Nie połączono";
+  badge.textContent = "Nie zalogowano";
   badge.classList.add("offline");
   authSection.classList.remove("hidden");
   dashboardSection.classList.add("hidden");
   logoutBtn.classList.add("hidden");
   return false;
-}
-
-async function loadSites() {
-  const { sites } = await api("/api/sites");
-  const select = qs("siteSelect");
-  select.innerHTML = sites
-    .map((s) => `<option value="${escapeHtml(s.siteUrl)}">${escapeHtml(s.siteUrl)}</option>`)
-    .join("");
-
-  if (sites.length) {
-    state.siteUrl = sites[0].siteUrl;
-  }
-}
-
-async function loadOverview() {
-  const params = getQueryParams();
-  const data = await api(`/api/analytics/overview?${params}`);
-
-  qs("kpiClicks").textContent = fmt.number(data.overview.clicks);
-  qs("kpiImpressions").textContent = fmt.number(data.overview.impressions);
-  qs("kpiCtr").textContent = fmt.percent(data.overview.ctr);
-  qs("kpiPosition").textContent = fmt.position(data.overview.position);
-
-  renderTrendChart(data.trend.rows ?? [], data.trend.granularity);
 }
 
 async function loadBrandOverview({ force = false } = {}) {
@@ -1173,67 +1038,6 @@ async function refreshBrand() {
   await showBrandReport({ force: true });
 }
 
-async function loadDevices() {
-  const params = getQueryParams();
-  const data = await api(`/api/analytics/devices?${params}`);
-  renderDeviceChart("deviceChart", "device", data.rows ?? []);
-  renderDeviceChart("deviceDetailChart", "deviceDetail", data.rows ?? []);
-}
-
-async function loadQueries() {
-  const params = getQueryParams();
-  const data = await api(`/api/analytics/queries?${params}`);
-  renderTable("queriesTable", data.rows ?? [], "query");
-}
-
-async function loadPages() {
-  const params = getQueryParams();
-  const data = await api(`/api/analytics/pages?${params}`);
-  renderTable("pagesTable", data.rows ?? [], "page");
-}
-
-async function loadCountries() {
-  const params = getQueryParams();
-  const data = await api(`/api/analytics/countries?${params}`);
-  const rows = (data.rows ?? []).map((row) => ({
-    ...row,
-    keys: [countryLabel(row.keys[0])],
-  }));
-  renderTable("countriesTable", rows, "country");
-}
-
-async function refreshAll() {
-  hideAlert();
-  setLoading(true, "Ładowanie GSC…");
-
-  try {
-    await Promise.all([
-      loadOverview(),
-      loadDevices(),
-      loadQueries(),
-      loadPages(),
-      loadCountries(),
-    ]);
-  } catch (error) {
-    showAlert(error.message);
-  } finally {
-    setLoading(false);
-  }
-}
-
-function setupTabs() {
-  document.querySelectorAll(".gsc-tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".gsc-tab").forEach((t) => t.classList.remove("active"));
-      tab.classList.add("active");
-
-      ["overview", "queries", "pages", "devices", "countries"].forEach((name) => {
-        qs(`tab-${name}`).classList.toggle("hidden", tab.dataset.tab !== name);
-      });
-    });
-  });
-}
-
 function setupMainTabs() {
   document.querySelectorAll(".main-tab").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -1241,21 +1045,16 @@ function setupMainTabs() {
       btn.classList.add("active");
 
       const mainTab = btn.dataset.mainTab;
-      const isGsc = mainTab === "gsc";
       const isCategories = mainTab === "categories";
 
-      qs("brandDashboardSection").classList.toggle("hidden", isGsc || isCategories);
+      qs("brandDashboardSection").classList.toggle("hidden", isCategories);
       qs("brandCategoriesSection").classList.toggle("hidden", !isCategories);
-      qs("gscDashboardSection").classList.toggle("hidden", !isGsc);
-      syncBrandFiltersVisibility(mainTab);
       updateReportContextBar();
 
-      if (mainTab === "brand") {
-        await showBrandReport({ force: false });
-      } else if (mainTab === "categories") {
+      if (mainTab === "categories") {
         await showBrandCategoriesReport({ force: false });
       } else {
-        await refreshAll();
+        await showBrandReport({ force: false });
       }
     });
   });
@@ -1277,7 +1076,6 @@ function setupGranularity() {
 }
 
 async function init() {
-  setupTabs();
   setupPeriodPresets();
   setupGranularity();
   setupBrandKpiSelectors();
@@ -1288,20 +1086,18 @@ async function init() {
   updateReportContextBar();
 
   const initialMainTab = document.querySelector(".main-tab.active")?.dataset.mainTab ?? "brand";
-  qs("brandDashboardSection").classList.toggle(
-    "hidden",
-    initialMainTab === "gsc" || initialMainTab === "categories",
-  );
+  qs("brandDashboardSection").classList.toggle("hidden", initialMainTab === "categories");
   qs("brandCategoriesSection").classList.toggle("hidden", initialMainTab !== "categories");
-  qs("gscDashboardSection").classList.toggle("hidden", initialMainTab !== "gsc");
-  syncBrandFiltersVisibility(initialMainTab);
 
   const params = new URLSearchParams(window.location.search);
   if (params.get("connected") === "1") {
-    showAlert("Pomyślnie połączono z Google Search Console.", "ok");
+    showAlert("Zalogowano pomyślnie.", "ok");
     window.history.replaceState({}, "", "/");
   }
-  if (params.get("error")) {
+  if (params.get("error") === "not_allowed") {
+    showAlert("To konto Google nie ma dostępu do tej aplikacji.");
+    window.history.replaceState({}, "", "/");
+  } else if (params.get("error")) {
     showAlert("Logowanie nie powiodło się. Spróbuj ponownie.");
     window.history.replaceState({}, "", "/");
   }
@@ -1309,7 +1105,7 @@ async function init() {
   qs("refreshBtn").addEventListener("click", () => refreshActiveDashboard({ force: true }));
   qs("wskzShowDomainCols")?.addEventListener("change", syncWskzDomainColumnVisibility);
   qs("logoutBtn").addEventListener("click", async () => {
-    await fetch("/auth/logout", { method: "POST" });
+    await fetch("/auth/logout", { method: "POST", credentials: "include" });
     window.location.reload();
   });
 
@@ -1317,14 +1113,11 @@ async function init() {
   if (!authed) return;
 
   try {
-    await loadSites();
     const activeMainTab = document.querySelector(".main-tab.active")?.dataset.mainTab ?? "brand";
-    if (activeMainTab === "brand") {
-      await refreshBrand();
-    } else if (activeMainTab === "categories") {
+    if (activeMainTab === "categories") {
       await refreshBrandCategories();
     } else {
-      await refreshAll();
+      await refreshBrand();
     }
   } catch (error) {
     showAlert(error.message);

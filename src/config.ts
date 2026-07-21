@@ -1,9 +1,12 @@
 import { resolve } from "node:path";
+import { randomBytes } from "node:crypto";
 
 export interface AppConfig {
   googleClientId: string;
   googleClientSecret: string;
   googleRedirectUri: string;
+  sessionSecret: string;
+  allowedEmails: string[];
   port: number;
   host: string;
   tokensPath: string;
@@ -18,6 +21,14 @@ export function loadConfig(): AppConfig {
     throw new Error("GOOGLE_CLIENT_ID i GOOGLE_CLIENT_SECRET są wymagane");
   }
 
+  const sessionSecret =
+    process.env.SESSION_SECRET ??
+    (process.env.VERCEL ? "" : randomBytes(32).toString("hex"));
+
+  if (!sessionSecret) {
+    throw new Error("SESSION_SECRET jest wymagany na produkcji (Vercel)");
+  }
+
   const port = Number(process.env.PORT ?? 3300);
   const host = process.env.HOST ?? "127.0.0.1";
 
@@ -27,6 +38,11 @@ export function loadConfig(): AppConfig {
     googleRedirectUri:
       process.env.GOOGLE_REDIRECT_URI ??
       `http://${host}:${port}/auth/callback`,
+    sessionSecret,
+    allowedEmails: (process.env.ALLOWED_EMAILS ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
     port,
     host,
     tokensPath: resolve(process.env.DATA_PATH ?? "./data/tokens.json"),
