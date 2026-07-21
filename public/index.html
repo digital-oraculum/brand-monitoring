@@ -673,10 +673,16 @@
               </div>
             </div>
             <div class="dashboard-charts">
+              <div class="metric-toggle" id="wskzCategoryMetricToggle" role="group" aria-label="Metryka wykresów kategorii" style="margin-bottom: 0;">
+                <button type="button" class="active" data-category-metric="impressions">Wyświetlenia</button>
+                <button type="button" data-category-metric="clicks">Kliknięcia</button>
+                <button type="button" data-category-metric="ctr">CTR</button>
+                <button type="button" data-category-metric="position">Śr. pozycja</button>
+              </div>
               <div class="card">
                 <h3 style="margin-top: 0;" id="wskzCategoryPieTitle">Podział wyświetleń według kategorii</h3>
                 <p class="muted" style="margin-top: 0; font-size: 0.85rem;">
-                  Udział każdej kategorii w całkowitym ruchu brandowym w wybranym okresie.
+                  Udział każdej kategorii w wybranej metryce (jak wykres domen w Raporcie brand).
                 </p>
                 <div class="chart-wrap chart-wrap-sm">
                   <canvas id="wskzCategoryPieChart"></canvas>
@@ -690,12 +696,6 @@
                 Trend według kategorii
                 <span id="wskzCategoryTrendLabel" class="muted" style="font-size: 0.85rem; font-weight: normal;">(wyświetlenia, miesięcznie)</span>
               </h3>
-              <div class="metric-toggle" id="wskzCategoryMetricToggle" role="group" aria-label="Metryka wykresu trendu">
-                <button type="button" class="active" data-category-metric="impressions">Wyświetlenia</button>
-                <button type="button" data-category-metric="clicks">Kliknięcia</button>
-                <button type="button" data-category-metric="ctr">CTR</button>
-                <button type="button" data-category-metric="position">Śr. pozycja</button>
-              </div>
               <p class="muted" style="margin: 0 0 8px; font-size: 0.8rem;">
                 Serie ukryjesz/pokazujesz klikając legendę wykresu.
               </p>

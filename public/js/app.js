@@ -776,10 +776,34 @@ const CATEGORY_COLORS = {
 };
 
 const CATEGORY_METRICS = {
-  impressions: { label: "Wyświetlenia", format: (v) => fmt.number(v), chartValue: (v) => v },
-  clicks: { label: "Kliknięcia", format: (v) => fmt.number(v), chartValue: (v) => v },
-  ctr: { label: "CTR", format: (v) => fmt.percent(v), chartValue: (v) => v * 100 },
-  position: { label: "Śr. pozycja", format: (v) => fmt.position(v), chartValue: (v) => v },
+  impressions: {
+    label: "Wyświetlenia",
+    format: (v) => fmt.number(v),
+    chartValue: (v) => v,
+    chartType: "pie",
+    distributionTitle: "Podział wyświetleń według kategorii",
+  },
+  clicks: {
+    label: "Kliknięcia",
+    format: (v) => fmt.number(v),
+    chartValue: (v) => v,
+    chartType: "pie",
+    distributionTitle: "Podział kliknięć według kategorii",
+  },
+  ctr: {
+    label: "CTR",
+    format: (v) => fmt.percent(v),
+    chartValue: (v) => v * 100,
+    chartType: "bar",
+    distributionTitle: "CTR według kategorii",
+  },
+  position: {
+    label: "Śr. pozycja",
+    format: (v) => fmt.position(v),
+    chartValue: (v) => v,
+    chartType: "bar",
+    distributionTitle: "Śr. pozycja według kategorii",
+  },
 };
 
 const brandCategoryState = {
@@ -895,16 +919,10 @@ function updateBrandCategoryTrendLabel() {
   if (label) label.textContent = `(${metric.label.toLowerCase()}, ${granLabel})`;
 }
 
-function getCategoryPieMetricKey() {
-  return ["impressions", "clicks"].includes(brandCategoryState.metric)
-    ? brandCategoryState.metric
-    : "impressions";
-}
-
 function updateBrandCategoryPieTitle() {
-  const metric = CATEGORY_METRICS[getCategoryPieMetricKey()];
+  const metric = CATEGORY_METRICS[brandCategoryState.metric] ?? CATEGORY_METRICS.impressions;
   const title = qs("wskzCategoryPieTitle");
-  if (title) title.textContent = `Podział ${metric.label.toLowerCase()} według kategorii`;
+  if (title) title.textContent = metric.distributionTitle;
 }
 
 function renderBrandCategoryPieChart() {
@@ -913,6 +931,8 @@ function renderBrandCategoryPieChart() {
   const wrap = canvas?.closest(".chart-wrap");
   const emptyEl = qs("wskzCategoryPieEmpty");
   const categories = brandCategoryState.categories ?? [];
+  const metricKey = brandCategoryState.metric;
+  const metric = CATEGORY_METRICS[metricKey] ?? CATEGORY_METRICS.impressions;
 
   if (!canvas) return;
 
@@ -922,10 +942,7 @@ function renderBrandCategoryPieChart() {
     return;
   }
 
-  const metricKey = getCategoryPieMetricKey();
-  const metric = CATEGORY_METRICS[metricKey];
-  const rows = categories.filter((row) => (row[metricKey] ?? 0) > 0);
-
+  const rows = categories.filter((row) => (row.impressions ?? 0) > 0);
   if (!rows.length) {
     wrap?.classList.add("hidden");
     emptyEl?.classList.remove("hidden");
@@ -937,40 +954,83 @@ function renderBrandCategoryPieChart() {
 
   const labels = rows.map((row) => row.category);
   const rawValues = rows.map((row) => row[metricKey] ?? 0);
+  const chartValues = rawValues.map((v) => metric.chartValue(v));
   const colors = labels.map((label) => CATEGORY_COLORS[label] ?? "#9aa8bc");
-  const total = rawValues.reduce((sum, value) => sum + value, 0);
   const ctx = canvas.getContext("2d");
 
-  state.charts.brandCategoryPie = new Chart(ctx, {
-    type: "pie",
-    data: {
-      labels,
-      datasets: [
-        {
-          data: rawValues,
-          backgroundColor: colors,
-          borderColor: "#151d31",
-          borderWidth: 2,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { position: "bottom", labels: { color: "#edf2f7" } },
-        tooltip: {
-          callbacks: {
-            label: (context) => {
-              const value = rawValues[context.dataIndex] ?? 0;
-              const share = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
-              return `${context.label}: ${metric.format(value)} (${share}%)`;
+  if (metric.chartType === "pie") {
+    const total = chartValues.reduce((sum, value) => sum + value, 0);
+    state.charts.brandCategoryPie = new Chart(ctx, {
+      type: "pie",
+      data: {
+        labels,
+        datasets: [
+          {
+            data: chartValues,
+            backgroundColor: colors,
+            borderColor: "#151d31",
+            borderWidth: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "bottom", labels: { color: "#edf2f7" } },
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const value = rawValues[context.dataIndex] ?? 0;
+                const share = total > 0 ? ((context.parsed / total) * 100).toFixed(1) : "0.0";
+                return `${context.label}: ${metric.format(value)} (${share}%)`;
+              },
             },
           },
         },
       },
-    },
-  });
+    });
+  } else {
+    state.charts.brandCategoryPie = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: metric.label,
+            data: chartValues,
+            backgroundColor: colors,
+            borderRadius: 8,
+          },
+        ],
+      },
+      options: {
+        ...chartDefaults(),
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const value = rawValues[context.dataIndex] ?? 0;
+                return `${metric.label}: ${metric.format(value)}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: chartDefaults().scales.x,
+          y: {
+            ...chartDefaults().scales.y,
+            ticks: {
+              ...chartDefaults().scales.y.ticks,
+              callback: (value) =>
+                metricKey === "ctr" ? `${Number(value).toFixed(2)}%` : value,
+            },
+          },
+        },
+      },
+    });
+  }
 
   requestAnimationFrame(() => state.charts.brandCategoryPie?.resize());
 }
