@@ -732,6 +732,8 @@ function setBrandCategoryMetric(metric) {
     btn.classList.toggle("active", btn.dataset.categoryMetric === metric);
   });
   updateBrandCategoryTrendLabel();
+  updateBrandCategoryPieTitle();
+  renderBrandCategoryPieChart();
   renderBrandCategoryTrendChart();
 }
 
@@ -827,6 +829,92 @@ function updateBrandCategoryTrendLabel() {
   if (label) label.textContent = `(${metric.label.toLowerCase()}, ${granLabel})`;
 }
 
+function getCategoryPieMetricKey() {
+  return ["impressions", "clicks"].includes(brandCategoryState.metric)
+    ? brandCategoryState.metric
+    : "impressions";
+}
+
+function updateBrandCategoryPieTitle() {
+  const metric = CATEGORY_METRICS[getCategoryPieMetricKey()];
+  const title = qs("wskzCategoryPieTitle");
+  if (title) title.textContent = `Podział ${metric.label.toLowerCase()} według kategorii`;
+}
+
+function renderBrandCategoryPieChart() {
+  destroyChart("brandCategoryPie");
+  const canvas = qs("wskzCategoryPieChart");
+  const wrap = canvas?.closest(".chart-wrap");
+  const emptyEl = qs("wskzCategoryPieEmpty");
+  const categories = brandCategoryState.categories ?? [];
+
+  if (!canvas) return;
+
+  if (!categories.length) {
+    wrap?.classList.add("hidden");
+    emptyEl?.classList.remove("hidden");
+    return;
+  }
+
+  const metricKey = getCategoryPieMetricKey();
+  const metric = CATEGORY_METRICS[metricKey];
+  const rows = categories.filter((row) => (row[metricKey] ?? 0) > 0);
+
+  if (!rows.length) {
+    wrap?.classList.add("hidden");
+    emptyEl?.classList.remove("hidden");
+    return;
+  }
+
+  wrap?.classList.remove("hidden");
+  emptyEl?.classList.add("hidden");
+
+  const labels = rows.map((row) => row.category);
+  const rawValues = rows.map((row) => row[metricKey] ?? 0);
+  const colors = labels.map((label) => CATEGORY_COLORS[label] ?? "#9aa8bc");
+  const total = rawValues.reduce((sum, value) => sum + value, 0);
+  const ctx = canvas.getContext("2d");
+
+  state.charts.brandCategoryPie = new Chart(ctx, {
+    type: "pie",
+    data: {
+      labels,
+      datasets: [
+        {
+          data: rawValues,
+          backgroundColor: colors,
+          borderColor: "#151d31",
+          borderWidth: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom", labels: { color: "#edf2f7" } },
+        tooltip: {
+          callbacks: {
+            label: (context) => {
+              const value = rawValues[context.dataIndex] ?? 0;
+              const share = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
+              return `${context.label}: ${metric.format(value)} (${share}%)`;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  requestAnimationFrame(() => state.charts.brandCategoryPie?.resize());
+}
+
+function refreshBrandCategoryCharts() {
+  updateBrandCategoryPieTitle();
+  renderBrandCategoryPieChart();
+  renderBrandCategoryTrendChart();
+}
+
 const CATEGORY_PRIORITY = {
   "Czysty brand": 1,
   Miasta: 2,
@@ -920,11 +1008,12 @@ function applyBrandCategoriesData(data) {
 
   brandCategoryState.trend = data.trend ?? null;
   renderBrandDomainStatus(data);
+  updateBrandCategoryTrendLabel();
+  updateBrandCategoryPieTitle();
   renderBrandCategoriesTable(data.categories ?? []);
   populateBrandCategoryFilter(data.categoryList ?? data.categories?.map((c) => c.category) ?? []);
   renderBrandCategoryQueriesTable(data.queries ?? []);
-  updateBrandCategoryTrendLabel();
-  renderBrandCategoryTrendChart();
+  requestAnimationFrame(() => refreshBrandCategoryCharts());
   updateReportContextBar();
 }
 
@@ -1053,6 +1142,7 @@ function setupMainTabs() {
 
       if (mainTab === "categories") {
         await showBrandCategoriesReport({ force: false });
+        requestAnimationFrame(() => refreshBrandCategoryCharts());
       } else {
         await showBrandReport({ force: false });
       }

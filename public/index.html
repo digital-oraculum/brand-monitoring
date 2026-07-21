@@ -254,6 +254,12 @@
         margin-bottom: 16px;
       }
 
+      .dashboard-charts {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
       @media (max-width: 1100px) {
         .dashboard-grid { grid-template-columns: 1fr; }
       }
@@ -666,7 +672,20 @@
                 </table>
               </div>
             </div>
-            <div class="card">
+            <div class="dashboard-charts">
+              <div class="card">
+                <h3 style="margin-top: 0;" id="wskzCategoryPieTitle">Podział wyświetleń według kategorii</h3>
+                <p class="muted" style="margin-top: 0; font-size: 0.85rem;">
+                  Udział każdej kategorii w całkowitym ruchu brandowym w wybranym okresie.
+                </p>
+                <div class="chart-wrap chart-wrap-sm">
+                  <canvas id="wskzCategoryPieChart"></canvas>
+                </div>
+                <p id="wskzCategoryPieEmpty" class="muted hidden" style="margin: 12px 0 0; font-size: 0.85rem; text-align: center;">
+                  Brak danych do wykresu w wybranym okresie.
+                </p>
+              </div>
+              <div class="card">
               <h3 style="margin-top: 0;">
                 Trend według kategorii
                 <span id="wskzCategoryTrendLabel" class="muted" style="font-size: 0.85rem; font-weight: normal;">(wyświetlenia, miesięcznie)</span>
@@ -681,6 +700,7 @@
                 Serie ukryjesz/pokazujesz klikając legendę wykresu.
               </p>
               <div class="chart-wrap"><canvas id="wskzCategoryTrendChart"></canvas></div>
+              </div>
             </div>
           </div>
 
