@@ -20,13 +20,14 @@ export async function buildApp() {
   await app.register(cors, { origin: true });
   await registerRoutes(app, { config, oauth, tokenStore });
 
-  // Na Vercel pliki statyczne serwuje CDN z katalogu public/
-  if (!process.env.VERCEL) {
-    await app.register(fastifyStatic, {
-      root: resolve(__dirname, "../public"),
-      prefix: "/",
-    });
-  }
+  const publicRoot = process.env.VERCEL
+    ? resolve(process.cwd(), "public")
+    : resolve(__dirname, "../public");
+
+  await app.register(fastifyStatic, {
+    root: publicRoot,
+    prefix: "/",
+  });
 
   return app;
 }
