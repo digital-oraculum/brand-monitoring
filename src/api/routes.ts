@@ -33,6 +33,7 @@ import {
   mergeBrandQueryRows,
   monthKeyFromDate,
 } from "../brand/wskz-brand-data.js";
+import { fetchBrandDataset } from "../brand/wskz-brand-dataset.js";
 
 const brandDateRangeSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -294,6 +295,60 @@ export async function registerRoutes(
   app.post("/auth/logout", async (_req, reply) => {
     reply.clearCookie(getSessionCookieName(), { path: "/" });
     return { ok: true };
+  });
+
+  const brandDatasetCache = new Map<string, { expiresAt: number; data: Awaited<ReturnType<typeof fetchBrandDataset>> }>();
+  const BRAND_DATASET_CACHE_MS = 10 * 60 * 1000;
+
+  app.get("/api/brand/wskz/dataset", { preHandler: authGuard }, async (req, reply) => {
+    const client = getGscClient(gscAuth);
+    if (!client) {
+      return reply.status(503).send({
+        error: "Brak skonfigurowanego dostępu do Google Search Console po stronie serwera",
+      });
+    }
+
+    const parsed = parseBrandDateRangeQuery(req.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: "Nieprawidłowe parametry", details: parsed.error.flatten() });
+    }
+
+    const { startDate, endDate } = parsed.data;
+    const cacheKey = `${startDate}|${endDate}`;
+    const cached = brandDatasetCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { ...cached.data, fromCache: true };
+    }
+
+    try {
+      const allBrandSites = await resolveBrandSites(client, deps.config.wskzDomains);
+      if (!allBrandSites.matched.length) {
+        return reply.status(404).send({
+          error: "Nie skonfigurowano dostępu GSC do domen WSKZ",
+          configuredDomains: deps.config.wskzDomains,
+          missingDomains: allBrandSites.missing,
+        });
+      }
+
+      const dataset = await fetchBrandDataset(
+        client,
+        allBrandSites.matched,
+        startDate,
+        endDate,
+        deps.config.wskzDomains,
+        allBrandSites.missing,
+      );
+
+      brandDatasetCache.set(cacheKey, {
+        data: dataset,
+        expiresAt: Date.now() + BRAND_DATASET_CACHE_MS,
+      });
+
+      return dataset;
+    } catch (error) {
+      app.log.error(error);
+      return reply.status(502).send({ error: "Nie udało się pobrać danych raportu WSKZ" });
+    }
   });
 
   // Brand report: agregacja dla WSKZ po wielu domenach

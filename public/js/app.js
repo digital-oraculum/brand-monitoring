@@ -217,29 +217,25 @@ function setupPeriodPresets() {
 async function refreshActiveDashboard({ force = true } = {}) {
   if (qs("dashboardSection").classList.contains("hidden")) return;
 
-  const activeMainTab = document.querySelector(".main-tab.active")?.dataset.mainTab ?? "brand";
-  if (activeMainTab === "categories") {
-    if (force) await refreshBrandCategories();
-    else await showBrandCategoriesReport({ force: false });
-  } else {
-    if (force) await refreshBrand();
-    else await showBrandReport({ force: false });
+  if (force) {
+    clearBrandDatasetCache();
   }
+
+  const hasDataset =
+    !force &&
+    brandDatasetState.cacheKey === getBrandDatasetCacheKey() &&
+    brandDatasetState.dataset;
+
+  if (hasDataset) {
+    applyBrandDatasetViews();
+    return;
+  }
+
+  await loadBrandDataset({ force, showLoading: true });
 }
 
 function getSelectedGranularity() {
   return qs("granularity")?.value === "day" ? "day" : "month";
-}
-
-function appendGranularityParam(params) {
-  params.set("granularity", getSelectedGranularity());
-  return params;
-}
-
-function getQueryParams() {
-  const startDate = qs("startDate").value;
-  const endDate = qs("endDate").value;
-  return appendGranularityParam(new URLSearchParams({ startDate, endDate }));
 }
 
 const DEFAULT_WSKZ_DOMAINS = [
@@ -298,30 +294,78 @@ function getSelectedBrandDomains() {
   return [...brandDomainState.selectedDomains];
 }
 
-function getBrandQueryParams() {
-  const params = new URLSearchParams({
+function getBrandDatasetParams() {
+  return new URLSearchParams({
     startDate: qs("startDate").value,
     endDate: qs("endDate").value,
   });
-  const selected = getSelectedBrandDomains();
-  if (selected.length) {
-    params.set("domains", selected.join(","));
-  }
-  return appendGranularityParam(params);
 }
 
-function syncBrandDomainStateFromResponse(data) {
-  if (Array.isArray(data.availableDomains) && data.availableDomains.length) {
-    brandDomainState.availableDomains = data.availableDomains;
+function getBrandDatasetCacheKey() {
+  return `${qs("startDate").value}|${qs("endDate").value}`;
+}
+
+const brandDatasetState = {
+  cacheKey: null,
+  dataset: null,
+};
+
+function clearBrandDatasetCache() {
+  brandDatasetState.cacheKey = null;
+  brandDatasetState.dataset = null;
+}
+
+async function ensureBrandDataset({ force = false } = {}) {
+  const cacheKey = getBrandDatasetCacheKey();
+  if (!force && brandDatasetState.cacheKey === cacheKey && brandDatasetState.dataset) {
+    return { dataset: brandDatasetState.dataset, fromCache: true };
   }
 
-  if (Array.isArray(data.missingDomains)) {
-    brandDomainState.missingDomains = data.missingDomains;
+  const params = getBrandDatasetParams();
+  const dataset = await api(`/api/brand/wskz/dataset?${params}`);
+  brandDatasetState.cacheKey = cacheKey;
+  brandDatasetState.dataset = dataset;
+
+  if (Array.isArray(dataset.availableDomains) && dataset.availableDomains.length) {
+    brandDomainState.availableDomains = dataset.availableDomains;
+  }
+  if (Array.isArray(dataset.missingDomains)) {
+    brandDomainState.missingDomains = dataset.missingDomains;
   }
 
-  if (Array.isArray(data.selectedDomains) && data.selectedDomains.length) {
-    brandDomainState.selectedDomains = new Set(data.selectedDomains);
-  }
+  return { dataset, fromCache: false };
+}
+
+function applyBrandOverviewViews(views, meta) {
+  qs("wskzKpiClicks").textContent = fmt.number(views.overview.clicks);
+  qs("wskzKpiImpressions").textContent = fmt.number(views.overview.impressions);
+  qs("wskzKpiCtr").textContent = fmt.percent(views.overview.ctr);
+  qs("wskzKpiPosition").textContent = fmt.position(views.overview.position);
+
+  renderBrandDomainStatus(meta);
+  brandDomainChartState.breakdown = views.domainBreakdown ?? [];
+  renderBrandTrendChart(views.trend.rows ?? [], views.trend.granularity);
+  renderBrandDomainChart();
+}
+
+function applyBrandDatasetViews() {
+  if (!brandDatasetState.dataset) return;
+
+  const selectedDomains = getSelectedBrandDomains();
+  if (!selectedDomains.length) return;
+
+  const views = buildBrandViewsFromDataset(
+    brandDatasetState.dataset,
+    selectedDomains,
+    getSelectedGranularity(),
+  );
+  const meta = { ...views.meta, selectedDomains };
+
+  applyBrandOverviewViews(views, meta);
+  renderBrandQueriesTable(views.queries.rows ?? [], meta.domainColumns ?? []);
+  applyBrandCategoriesData({ ...views.categories, ...meta });
+  updateReportContextBar();
+  requestAnimationFrame(() => refreshBrandCategoryCharts());
 }
 
 function renderBrandDomainPills() {
@@ -363,12 +407,22 @@ function renderBrandDomainPills() {
 
       renderBrandDomainPills();
       updateReportContextBar();
-      await refreshActiveDashboard();
+      applyBrandDatasetViews();
     });
   });
 
   brandDomainState.pillsReady = true;
   updateReportContextBar();
+}
+
+function syncBrandDomainStateFromResponse(data) {
+  if (Array.isArray(data.availableDomains) && data.availableDomains.length) {
+    brandDomainState.availableDomains = data.availableDomains;
+  }
+
+  if (Array.isArray(data.missingDomains)) {
+    brandDomainState.missingDomains = data.missingDomains;
+  }
 }
 
 function renderBrandDomainStatus(data) {
@@ -394,25 +448,37 @@ async function api(path, options = {}) {
   return data;
 }
 
-/** Cache odpowiedzi brand na czas sesji (ten sam okres + domeny + granulacja). */
-const brandApiCache = new Map();
+async function loadBrandDataset({ force = false, showLoading = true } = {}) {
+  const hasCache =
+    !force &&
+    brandDatasetState.cacheKey === getBrandDatasetCacheKey() &&
+    brandDatasetState.dataset;
 
-function getBrandCacheKey(endpoint, params) {
-  return `${endpoint}?${params.toString()}`;
-}
-
-function clearBrandApiCache() {
-  brandApiCache.clear();
-}
-
-async function fetchBrandApi(endpoint, params, { force = false } = {}) {
-  const key = getBrandCacheKey(endpoint, params);
-  if (!force && brandApiCache.has(key)) {
-    return { data: brandApiCache.get(key), fromCache: true };
+  if (!hasCache && showLoading) {
+    setLoading(true, "Ładowanie danych GSC…");
   }
-  const data = await api(`${endpoint}?${params}`);
-  brandApiCache.set(key, data);
-  return { data, fromCache: false };
+
+  try {
+    await ensureBrandDataset({ force });
+    applyBrandDatasetViews();
+  } catch (error) {
+    showAlert(error.message);
+    throw error;
+  } finally {
+    if (!hasCache && showLoading) {
+      setLoading(false);
+    }
+  }
+}
+
+async function showBrandReport({ force = false } = {}) {
+  hideAlert();
+  await loadBrandDataset({ force, showLoading: true });
+}
+
+async function refreshBrand() {
+  clearBrandDatasetCache();
+  await showBrandReport({ force: true });
 }
 
 const DOMAIN_VISIBLE_LABEL = "słowo kluczowe widoczne";
@@ -1007,7 +1073,6 @@ function applyBrandCategoriesData(data) {
   qs("wskzCatTotalPosition").textContent = fmt.position(data.overview?.position ?? 0);
 
   brandCategoryState.trend = data.trend ?? null;
-  renderBrandDomainStatus(data);
   updateBrandCategoryTrendLabel();
   updateBrandCategoryPieTitle();
   renderBrandCategoriesTable(data.categories ?? []);
@@ -1017,37 +1082,18 @@ function applyBrandCategoriesData(data) {
   updateReportContextBar();
 }
 
-async function loadBrandCategories({ force = false } = {}) {
-  const params = getBrandQueryParams();
-  const { data, fromCache } = await fetchBrandApi("/api/brand/wskz/categories", params, { force });
-  applyBrandCategoriesData(data);
-  return { fromCache };
-}
-
 async function showBrandCategoriesReport({ force = false } = {}) {
   hideAlert();
-  const params = getBrandQueryParams();
-  const cacheKey = getBrandCacheKey("/api/brand/wskz/categories", params);
-  const hasCache = !force && brandApiCache.has(cacheKey);
+  const hasDataset =
+    !force &&
+    brandDatasetState.cacheKey === getBrandDatasetCacheKey() &&
+    brandDatasetState.dataset;
 
-  if (!hasCache) {
-    setLoading(true, "Ładowanie raportu brand z podziałem na kategorie…");
-  }
-
-  try {
-    const { fromCache } = await loadBrandCategories({ force });
-    if (fromCache) {
-      // natychmiastowe przełączenie bez overlay
-    }
-  } catch (error) {
-    showAlert(error.message);
-  } finally {
-    setLoading(false);
-  }
+  await loadBrandDataset({ force, showLoading: !hasDataset });
 }
 
 async function refreshBrandCategories() {
-  clearBrandApiCache();
+  clearBrandDatasetCache();
   await showBrandCategoriesReport({ force: true });
 }
 
@@ -1073,58 +1119,6 @@ async function loadAuthStatus() {
   dashboardSection.classList.add("hidden");
   logoutBtn.classList.add("hidden");
   return false;
-}
-
-async function loadBrandOverview({ force = false } = {}) {
-  const params = getBrandQueryParams();
-  const { data } = await fetchBrandApi("/api/brand/wskz/overview", params, { force });
-
-  qs("wskzKpiClicks").textContent = fmt.number(data.overview.clicks);
-  qs("wskzKpiImpressions").textContent = fmt.number(data.overview.impressions);
-  qs("wskzKpiCtr").textContent = fmt.percent(data.overview.ctr);
-  qs("wskzKpiPosition").textContent = fmt.position(data.overview.position);
-
-  renderBrandDomainStatus(data);
-  brandDomainChartState.breakdown = data.domainBreakdown ?? [];
-  renderBrandTrendChart(data.trend.rows ?? [], data.trend.granularity);
-  renderBrandDomainChart();
-  updateReportContextBar();
-  return data;
-}
-
-async function loadBrandQueries({ force = false } = {}) {
-  const params = getBrandQueryParams();
-  const { data } = await fetchBrandApi("/api/brand/wskz/queries", params, { force });
-  renderBrandDomainStatus(data);
-  renderBrandQueriesTable(data.rows ?? [], data.domainColumns ?? data.domains ?? []);
-  updateReportContextBar();
-  return data;
-}
-
-async function showBrandReport({ force = false } = {}) {
-  hideAlert();
-  const params = getBrandQueryParams();
-  const hasCache =
-    !force &&
-    brandApiCache.has(getBrandCacheKey("/api/brand/wskz/overview", params)) &&
-    brandApiCache.has(getBrandCacheKey("/api/brand/wskz/queries", params));
-
-  if (!hasCache) {
-    setLoading(true, "Ładowanie raportu brand…");
-  }
-
-  try {
-    await Promise.all([loadBrandOverview({ force }), loadBrandQueries({ force })]);
-  } catch (error) {
-    showAlert(error.message);
-  } finally {
-    setLoading(false);
-  }
-}
-
-async function refreshBrand() {
-  clearBrandApiCache();
-  await showBrandReport({ force: true });
 }
 
 function setupMainTabs() {
@@ -1159,9 +1153,9 @@ function setupQuerySearch() {
 
 function setupGranularity() {
   updateTrendGranularityLabels(getSelectedGranularity());
-  qs("granularity")?.addEventListener("change", async () => {
+  qs("granularity")?.addEventListener("change", () => {
     updateReportContextBar();
-    await refreshActiveDashboard();
+    applyBrandDatasetViews();
   });
 }
 
@@ -1203,12 +1197,7 @@ async function init() {
   if (!authed) return;
 
   try {
-    const activeMainTab = document.querySelector(".main-tab.active")?.dataset.mainTab ?? "brand";
-    if (activeMainTab === "categories") {
-      await refreshBrandCategories();
-    } else {
-      await refreshBrand();
-    }
+    await loadBrandDataset({ force: true });
   } catch (error) {
     showAlert(error.message);
   }
