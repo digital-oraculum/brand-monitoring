@@ -629,30 +629,24 @@
             (1. Czysty brand → 2. Miasta → 3. Nawigacyjne → 4. Reputacyjne → 5. Sprzedażowe → 6. Praca → 7. Pozostałe).
           </p>
 
+          <p class="kpi-hint">Kliknij kartę KPI, aby zmienić metrykę na wykresie rozkładu i trendu kategorii.</p>
           <div class="kpi-grid">
-            <div class="card kpi">
+            <div class="card kpi kpi-selectable active" data-metric="impressions" role="button" tabindex="0" title="Pokaż wyświetlenia na wykresach kategorii">
               <div class="label">Wyświetlenia (brand)</div>
               <div class="value" id="wskzCatTotalImpressions">—</div>
             </div>
-            <div class="card kpi">
+            <div class="card kpi kpi-selectable" data-metric="clicks" role="button" tabindex="0" title="Pokaż kliknięcia na wykresach kategorii">
               <div class="label">Kliknięcia (brand)</div>
               <div class="value" id="wskzCatTotalClicks">—</div>
             </div>
-            <div class="card kpi">
+            <div class="card kpi kpi-selectable" data-metric="ctr" role="button" tabindex="0" title="Pokaż CTR na wykresach kategorii">
               <div class="label">CTR (brand)</div>
               <div class="value" id="wskzCatTotalCtr">—</div>
             </div>
-            <div class="card kpi">
+            <div class="card kpi kpi-selectable" data-metric="position" role="button" tabindex="0" title="Pokaż śr. pozycję na wykresach kategorii">
               <div class="label">Śr. pozycja (brand)</div>
               <div class="value" id="wskzCatTotalPosition">—</div>
             </div>
-          </div>
-
-          <div class="metric-toggle" id="wskzCategoryMetricToggle" role="group" aria-label="Metryka wykresów kategorii" style="margin-bottom: 16px;">
-            <button type="button" class="active" data-category-metric="impressions">Wyświetlenia</button>
-            <button type="button" data-category-metric="clicks">Kliknięcia</button>
-            <button type="button" data-category-metric="ctr">CTR</button>
-            <button type="button" data-category-metric="position">Śr. pozycja</button>
           </div>
 
           <div class="dashboard-grid">

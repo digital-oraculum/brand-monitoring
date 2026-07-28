@@ -818,9 +818,9 @@ const brandCategoryState = {
 function setBrandCategoryMetric(metric) {
   if (!CATEGORY_METRICS[metric]) return;
   brandCategoryState.metric = metric;
-  document.querySelectorAll("#wskzCategoryMetricToggle [data-category-metric]").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.categoryMetric === metric);
-  });
+  document
+    .querySelectorAll("#brandCategoriesSection .kpi-selectable")
+    .forEach((card) => card.classList.toggle("active", card.dataset.metric === metric));
   updateBrandCategoryTrendLabel();
   updateBrandCategoryPieTitle();
   renderBrandCategoryPieChart();
@@ -828,8 +828,15 @@ function setBrandCategoryMetric(metric) {
 }
 
 function setupBrandCategoryControls() {
-  document.querySelectorAll("#wskzCategoryMetricToggle [data-category-metric]").forEach((btn) => {
-    btn.addEventListener("click", () => setBrandCategoryMetric(btn.dataset.categoryMetric));
+  document.querySelectorAll("#brandCategoriesSection .kpi-selectable").forEach((card) => {
+    const activate = () => setBrandCategoryMetric(card.dataset.metric);
+    card.addEventListener("click", activate);
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activate();
+      }
+    });
   });
 
   qs("wskzCategoryFilter")?.addEventListener("change", (event) => {
