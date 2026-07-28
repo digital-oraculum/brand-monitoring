@@ -601,16 +601,6 @@ function updateTrendGranularityLabels(granularity) {
 }
 
 
-function formatPeriodMetricsTooltip(row) {
-  if (!row) return [];
-  return [
-    `Wyświetlenia: ${fmt.number(row.impressions ?? 0)}`,
-    `Kliknięcia: ${fmt.number(row.clicks ?? 0)}`,
-    `CTR: ${fmt.percent(row.ctr ?? 0)}`,
-    `Śr. pozycja: ${fmt.position(row.position ?? 0)}`,
-  ];
-}
-
 function renderBrandTrendChart(rows, granularity = getSelectedGranularity()) {
   destroyChart("brandTrend");
   updateTrendGranularityLabels(granularity);
@@ -650,11 +640,9 @@ function renderBrandTrendChart(rows, granularity = getSelectedGranularity()) {
           mode: "index",
           intersect: false,
           callbacks: {
-            label: () => null,
-            afterBody: (items) => {
-              const idx = items[0]?.dataIndex;
-              if (idx == null) return [];
-              return formatPeriodMetricsTooltip(sorted[idx]);
+            label: (context) => {
+              const value = context.parsed?.y ?? 0;
+              return `${context.dataset.label}: ${fmt.number(value)}`;
             },
           },
         },
@@ -1152,14 +1140,8 @@ function renderBrandCategoryTrendChart() {
             label: (context) => {
               const row = trend.series?.find((s) => s.category === context.dataset.label)
                 ?.rows?.[context.dataIndex];
-              if (!row) return context.dataset.label;
-              return [
-                context.dataset.label,
-                `  Wyświetlenia: ${fmt.number(row.impressions ?? 0)}`,
-                `  Kliknięcia: ${fmt.number(row.clicks ?? 0)}`,
-                `  CTR: ${fmt.percent(row.ctr ?? 0)}`,
-                `  Śr. pozycja: ${fmt.position(row.position ?? 0)}`,
-              ];
+              const value = row?.[brandCategoryState.metric] ?? context.parsed?.y ?? 0;
+              return `${context.dataset.label}: ${metric.format(value)}`;
             },
           },
         },
