@@ -601,6 +601,16 @@ function updateTrendGranularityLabels(granularity) {
 }
 
 
+function formatPeriodMetricsTooltip(row) {
+  if (!row) return [];
+  return [
+    `Wyświetlenia: ${fmt.number(row.impressions ?? 0)}`,
+    `Kliknięcia: ${fmt.number(row.clicks ?? 0)}`,
+    `CTR: ${fmt.percent(row.ctr ?? 0)}`,
+    `Śr. pozycja: ${fmt.position(row.position ?? 0)}`,
+  ];
+}
+
 function renderBrandTrendChart(rows, granularity = getSelectedGranularity()) {
   destroyChart("brandTrend");
   updateTrendGranularityLabels(granularity);
@@ -633,6 +643,22 @@ function renderBrandTrendChart(rows, granularity = getSelectedGranularity()) {
     },
     options: {
       ...chartDefaults(),
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        ...chartDefaults().plugins,
+        tooltip: {
+          mode: "index",
+          intersect: false,
+          callbacks: {
+            label: () => null,
+            afterBody: (items) => {
+              const idx = items[0]?.dataIndex;
+              if (idx == null) return [];
+              return formatPeriodMetricsTooltip(sorted[idx]);
+            },
+          },
+        },
+      },
       scales: {
         x: chartDefaults().scales.x,
         y: { ...chartDefaults().scales.y, position: "left" },
@@ -1114,17 +1140,26 @@ function renderBrandCategoryTrendChart() {
     data: { labels, datasets },
     options: {
       ...chartDefaults(),
+      interaction: { mode: "index", intersect: false },
       plugins: {
         legend: {
           labels: { color: "#edf2f7", boxWidth: 12 },
         },
         tooltip: {
+          mode: "index",
+          intersect: false,
           callbacks: {
             label: (context) => {
-              const raw = trend.series
-                ?.find((s) => s.category === context.dataset.label)
-                ?.rows?.[context.dataIndex]?.[brandCategoryState.metric];
-              return `${context.dataset.label}: ${metric.format(raw ?? 0)}`;
+              const row = trend.series?.find((s) => s.category === context.dataset.label)
+                ?.rows?.[context.dataIndex];
+              if (!row) return context.dataset.label;
+              return [
+                context.dataset.label,
+                `  Wyświetlenia: ${fmt.number(row.impressions ?? 0)}`,
+                `  Kliknięcia: ${fmt.number(row.clicks ?? 0)}`,
+                `  CTR: ${fmt.percent(row.ctr ?? 0)}`,
+                `  Śr. pozycja: ${fmt.position(row.position ?? 0)}`,
+              ];
             },
           },
         },
