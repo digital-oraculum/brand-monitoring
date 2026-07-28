@@ -1138,10 +1138,22 @@ function renderBrandCategoryTrendChart() {
           intersect: false,
           callbacks: {
             label: (context) => {
+              const metricKey = brandCategoryState.metric;
+              const idx = context.dataIndex;
               const row = trend.series?.find((s) => s.category === context.dataset.label)
-                ?.rows?.[context.dataIndex];
-              const value = row?.[brandCategoryState.metric] ?? context.parsed?.y ?? 0;
-              return `${context.dataset.label}: ${metric.format(value)}`;
+                ?.rows?.[idx];
+              const value = row?.[metricKey] ?? context.parsed?.y ?? 0;
+              const formatted = `${context.dataset.label}: ${metric.format(value)}`;
+
+              // Share only for additive metrics (impressions / clicks)
+              if (metric.chartType !== "pie") return formatted;
+
+              const monthTotal = (trend.series ?? []).reduce(
+                (sum, series) => sum + (series.rows?.[idx]?.[metricKey] ?? 0),
+                0
+              );
+              const share = monthTotal > 0 ? ((value / monthTotal) * 100).toFixed(1) : "0.0";
+              return `${formatted} (${share}%)`;
             },
           },
         },
