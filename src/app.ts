@@ -28,6 +28,10 @@ export async function buildApp() {
   const publicRoot = process.env.VERCEL
     ? resolve(process.cwd(), "public")
     : resolve(__dirname, "../public");
+  // Outside public/ so Vercel does not serve the app shell as a static file (SSO bypass).
+  const uiRoot = process.env.VERCEL
+    ? resolve(process.cwd(), "ui")
+    : resolve(__dirname, "../ui");
 
   await app.register(cors, { origin: true, credentials: true });
   await app.register(cookie);
@@ -38,7 +42,7 @@ export async function buildApp() {
     if (!loginAuth.getSession(req)) {
       return reply.redirect("/login.html");
     }
-    const indexHtml = resolve(publicRoot, "index.html");
+    const indexHtml = resolve(uiRoot, "index.html");
     if (!existsSync(indexHtml)) {
       return reply.status(404).send({ error: "index.html not found" });
     }
