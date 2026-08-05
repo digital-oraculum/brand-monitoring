@@ -6,6 +6,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   LoginGatewayClient,
+  SESSION_MAX_AGE_SEC,
+  createPkcePair,
+  getPkceCookieName,
   parseSessionToken,
   type UserSession,
 } from "./login-gateway-client.js";
@@ -20,11 +23,12 @@ export interface LoginGatewayAuthOptions {
 }
 
 export function createLoginGatewayAuth(options: LoginGatewayAuthOptions) {
-  const maxAge = options.sessionMaxAgeSec ?? 60 * 60 * 24 * 7;
+  const maxAge = options.sessionMaxAgeSec ?? SESSION_MAX_AGE_SEC;
   const client = new LoginGatewayClient({
     baseUrl: options.loginGatewayUrl,
     sessionSecret: options.sessionSecret,
   });
+  const audience = new URL(options.publicBaseUrl).origin;
 
   function cookieOptions() {
     return {
@@ -33,6 +37,16 @@ export function createLoginGatewayAuth(options: LoginGatewayAuthOptions) {
       sameSite: "lax" as const,
       path: "/",
       maxAge,
+    };
+  }
+
+  function pkceCookieOptions() {
+    return {
+      httpOnly: true,
+      secure: Boolean(process.env.VERCEL),
+      sameSite: "lax" as const,
+      path: "/",
+      maxAge: 15 * 60,
     };
   }
 
@@ -60,8 +74,10 @@ export function createLoginGatewayAuth(options: LoginGatewayAuthOptions) {
     });
 
     app.get("/auth/google", async (_req, reply) => {
+      const { verifier, challenge } = createPkcePair();
+      reply.setCookie(getPkceCookieName(), verifier, pkceCookieOptions());
       const returnTo = `${options.publicBaseUrl}/auth/complete`;
-      return reply.redirect(client.getStartUrl(returnTo));
+      return reply.redirect(client.getStartUrl(returnTo, challenge));
     });
 
     app.get("/auth/complete", async (req, reply) => {
@@ -74,12 +90,25 @@ export function createLoginGatewayAuth(options: LoginGatewayAuthOptions) {
       if (!query.login_code) {
         return reply.redirect("/login.html?error=missing_code");
       }
+
+      const verifier = req.cookies?.[getPkceCookieName()];
+      if (!verifier) {
+        return reply.redirect("/login.html?error=missing_pkce");
+      }
+
       try {
-        const result = await client.exchangeLoginCode(query.login_code);
-        reply.setCookie(options.cookieName, result.sessionToken, cookieOptions());
+        const result = await client.exchangeLoginCode(
+          query.login_code,
+          audience,
+          verifier,
+        );
+        const sessionToken = client.mintSessionToken(result.user);
+        reply.clearCookie(getPkceCookieName(), { path: "/" });
+        reply.setCookie(options.cookieName, sessionToken, cookieOptions());
         return reply.redirect("/");
       } catch (error) {
         req.log?.error(error);
+        reply.clearCookie(getPkceCookieName(), { path: "/" });
         return reply.redirect("/login.html?error=auth_failed");
       }
     });
