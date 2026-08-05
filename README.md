@@ -1,72 +1,63 @@
 # Brand Monitoring
 
-Lokalna aplikacja do analizy ruchu z **Google Search Console** — kliknięcia, wyświetlenia, CTR, pozycje, słowa kluczowe, strony, urządzenia i kraje.
+Aplikacja do analizy **ruchu brandowego WSKZ** z Google Search Console — kliknięcia, wyświetlenia, CTR, pozycje, słowa kluczowe oraz podział na kategorie intencji.
+
+**Szczegółowa dokumentacja** (filtrowanie fraz, kategorie, metryki, cache): [DOKUMENTACJA.md](./DOKUMENTACJA.md)
 
 ## Wymagania
 
 - Node.js 20+
-- Konto Google z dostępem do witryn w Search Console
-- Projekt w Google Cloud Console z włączonym Search Console API
+- **SEO/GEO Login Gateway** (logowanie użytkowników Google)
+- Token GSC z dostępem do domen WSKZ (`webmasters.readonly`)
+- Projekt w Google Cloud Console z włączonym Search Console API (osobny od Login Gateway)
 
-## Konfiguracja Google Cloud
+## Konfiguracja
 
-1. Wejdź na [Google Cloud Console](https://console.cloud.google.com/).
-2. Utwórz nowy projekt (lub wybierz istniejący).
-3. Włącz **Google Search Console API**:
-   - APIs & Services → Library → wyszukaj „Google Search Console API” → Enable
-4. Skonfiguruj **OAuth consent screen**:
-   - User type: External (lub Internal w organizacji)
-   - Dodaj scope: `.../auth/webmasters.readonly`
-   - Dodaj siebie jako test user (tryb Testing)
-5. Utwórz **OAuth 2.0 Client ID**:
-   - Typ: **Web application**
-   - Authorized redirect URI: `http://127.0.0.1:3300/auth/callback`
-6. Skopiuj Client ID i Client Secret do pliku `.env`.
+### Logowanie użytkownika (SSO)
+
+Logowanie obsługuje [seo-geo-login-gateway](../seo-geo-login-gateway). W `.env`:
+
+- `LOGIN_GATEWAY_URL` — np. `http://127.0.0.1:3400`
+- `PUBLIC_BASE_URL` — origin tej appki (musi być na `ALLOWED_RETURN_ORIGINS` gatewaya)
+- `SESSION_SECRET` — **ten sam** co na Login Gateway
+
+### Google Search Console (serwer)
+
+1. Wejdź na [Google Cloud Console](https://console.cloud.google.com/) — projekt **GSC** (nie Login Gateway).
+2. Włącz **Google Search Console API**.
+3. OAuth client + token serwisowy (`webmasters.readonly`) — lokalnie `data/tokens.json`, na Vercel `GSC_TOKENS_JSON`.
+4. `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` w `.env` służą **tylko GSC**, nie logowaniu UI.
 
 ## Uruchomienie
 
 ```bash
 cd "Projects/Brand Monitoring"
 cp .env.example .env
-# uzupełnij GOOGLE_CLIENT_ID i GOOGLE_CLIENT_SECRET
+# uzupełnij GOOGLE_* (GSC), SESSION_SECRET, LOGIN_GATEWAY_URL, PUBLIC_BASE_URL
 
 npm install
 npm run dev
 ```
 
-Otwórz: **http://127.0.0.1:3300**
+Otwórz: **http://127.0.0.1:3300** (Login Gateway musi działać na `:3400`).
 
-## Dashboardy
+## Raporty
 
 | Zakładka | Co pokazuje |
 |----------|-------------|
-| **Przegląd** | KPI + trend dzienny kliknięć/wyświetleń + podział urządzeń |
-| **Słowa kluczowe** | Top 50 zapytań z metrykami |
-| **Strony** | Top 50 URL-i |
-| **Urządzenia** | Desktop / Mobile / Tablet |
-| **Kraje** | Top 20 krajów |
+| **Raport brand** | KPI, trend kliknięć/wyświetleń, rozkład domen, tabela fraz brandowych |
+| **Raport brand z podziałem na kategorie** | Te same frazy z kategoriami (czysty brand, miasta, nawigacyjne, reputacyjne, sprzedażowe, praca, pozostałe) |
 
 ## Uwagi
 
-- GSC ma opóźnienie danych ~2–3 dni — domyślny zakres dat kończy się 3 dni wstecz.
-- Tokeny OAuth są zapisywane lokalnie w `data/tokens.json`.
-- Aplikacja jest przeznaczona do użytku lokalnego (single-user).
-
-## API (REST)
-
-| Endpoint | Opis |
-|----------|------|
-| `GET /api/auth/status` | Status logowania |
-| `GET /api/sites` | Lista witryn GSC |
-| `GET /api/analytics/overview?siteUrl=&startDate=&endDate=` | KPI + trend |
-| `GET /api/analytics/queries?...` | Słowa kluczowe |
-| `GET /api/analytics/pages?...` | Strony |
-| `GET /api/analytics/devices?...` | Urządzenia |
-| `GET /api/analytics/countries?...` | Kraje |
+- GSC ma opóźnienie danych ~2–3 dni — domyślny zakres kończy się 3 dni wstecz.
+- Frazy brandowe są filtrowane dwuetapowo (regex GSC + `isWskzBrandQuery`) — szczegóły w [DOKUMENTACJA.md](./DOKUMENTACJA.md).
+- Domeny: `WSKZ_DOMAINS` (domyślnie wskz.pl, studia-online.pl, studia-pedagogiczne.pl, studia-wroclaw.pl).
 
 ## Stack
 
 - Fastify + TypeScript
 - Google APIs (`googleapis`)
 - Chart.js (frontend)
-- OAuth 2.0 (offline refresh token)
+- OAuth 2.0 (sesja użytkownika + token GSC serwera)
+- Vercel (deploy produkcyjny)

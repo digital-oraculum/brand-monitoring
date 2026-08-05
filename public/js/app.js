@@ -1196,24 +1196,16 @@ async function refreshBrandCategories() {
 async function loadAuthStatus() {
   const status = await api("/api/auth/status");
   const badge = qs("authBadge");
-  const authSection = qs("authSection");
-  const dashboardSection = qs("dashboardSection");
   const logoutBtn = qs("logoutBtn");
 
   if (status.authenticated) {
     badge.textContent = status.email ? `Zalogowano: ${status.email}` : "Zalogowano";
     badge.classList.remove("offline");
-    authSection.classList.add("hidden");
-    dashboardSection.classList.remove("hidden");
     logoutBtn.classList.remove("hidden");
     return true;
   }
 
-  badge.textContent = "Nie zalogowano";
-  badge.classList.add("offline");
-  authSection.classList.remove("hidden");
-  dashboardSection.classList.add("hidden");
-  logoutBtn.classList.add("hidden");
+  window.location.replace("/login.html");
   return false;
 }
 
@@ -1286,7 +1278,7 @@ async function init() {
   qs("wskzShowDomainCols")?.addEventListener("change", syncWskzDomainColumnVisibility);
   qs("logoutBtn").addEventListener("click", async () => {
     await fetch("/auth/logout", { method: "POST", credentials: "include" });
-    window.location.reload();
+    window.location.replace("/login.html");
   });
 
   const authed = await loadAuthStatus();

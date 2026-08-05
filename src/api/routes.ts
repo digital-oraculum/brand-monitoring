@@ -1,15 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
-import type { UserGoogleAuth } from "../auth/user-google-auth.js";
 import type { GscServiceAuth } from "../auth/gsc-service-auth.js";
-import {
-  createSessionToken,
-  getSessionCookieName,
-  parseSessionToken,
-  sessionCookieOptions,
-  type UserSession,
-} from "../auth/session.js";
+import type { UserSession } from "../auth/session.js";
 import { GscClient } from "../gsc/client.js";
 import {
   isWskzBrandQuery,
@@ -52,24 +45,12 @@ function parseGranularity(query: unknown): TrendGranularity {
 
 interface RouteDeps {
   config: AppConfig;
-  userAuth: UserGoogleAuth;
   gscAuth: GscServiceAuth;
-}
-
-function getUserSession(req: FastifyRequest, secret: string): UserSession | null {
-  const cookieName = getSessionCookieName();
-  const token = req.cookies[cookieName];
-  return parseSessionToken(token, secret);
-}
-
-function requireUser(config: AppConfig) {
-  return async (req: FastifyRequest, reply: FastifyReply) => {
-    const session = getUserSession(req, config.sessionSecret);
-    if (!session) {
-      return reply.status(401).send({ error: "Wymagane logowanie" });
-    }
-    req.userSession = session;
-  };
+  requireUser: (
+    req: FastifyRequest,
+    reply: FastifyReply,
+  ) => Promise<unknown>;
+  getSession: (req: FastifyRequest) => UserSession | null;
 }
 
 function getGscClient(gscAuth: GscServiceAuth): GscClient | null {
@@ -252,49 +233,16 @@ export async function registerRoutes(
   app: FastifyInstance,
   deps: RouteDeps,
 ): Promise<void> {
-  const { config, userAuth, gscAuth } = deps;
-  const authGuard = requireUser(config);
+  const { config, gscAuth, requireUser, getSession } = deps;
+  const authGuard = requireUser;
 
-  app.get("/api/auth/status", async (req) => {
-    const session = getUserSession(req, config.sessionSecret);
+  app.get("/api/auth/me", async (req) => {
+    const session = getSession(req);
     return {
       authenticated: Boolean(session),
       email: session?.email ?? null,
-      name: session?.name ?? null,
       gscConfigured: gscAuth.isConfigured(),
     };
-  });
-
-  app.get("/auth/google", async (_req, reply) => {
-    const url = userAuth.getAuthUrl();
-    return reply.redirect(url);
-  });
-
-  app.get("/auth/callback", async (req, reply) => {
-    const code = (req.query as { code?: string }).code;
-    if (!code) {
-      return reply.redirect("/?error=missing_code");
-    }
-
-    try {
-      const profile = await userAuth.handleCallback(code);
-
-      if (!userAuth.isEmailAllowed(profile.email)) {
-        return reply.redirect("/?error=not_allowed");
-      }
-
-      const token = createSessionToken(profile, config.sessionSecret);
-      reply.setCookie(getSessionCookieName(), token, sessionCookieOptions());
-      return reply.redirect("/?connected=1");
-    } catch (error) {
-      app.log.error(error);
-      return reply.redirect("/?error=auth_failed");
-    }
-  });
-
-  app.post("/auth/logout", async (_req, reply) => {
-    reply.clearCookie(getSessionCookieName(), { path: "/" });
-    return { ok: true };
   });
 
   const brandDatasetCache = new Map<string, { expiresAt: number; data: Awaited<ReturnType<typeof fetchBrandDataset>> }>();
